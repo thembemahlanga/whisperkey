@@ -3,14 +3,25 @@ import streamlit as st
 
 from detector import redact_text
 from policy import evaluate_pipeline_policy, PolicyAction
+from decider_client import DeciderClient
 
 st.set_page_config(page_title="WhisperKey", page_icon="🔐")
 st.title("🔐 WhisperKey")
 st.caption("Local-first security guardrail for AI prompts")
 
-st.info(
-    "Demo mode: Decider is simulated. No prompts are sent to AWS."
+mode = st.radio(
+    "Decision engine",
+    ["Demo Mode", "Real Decider Mode"],
+    help="Demo Mode uses a simulated score. Real Decider Mode calls your configured local Decider server.",
 )
+
+if mode == "Demo Mode":
+    st.info("Demo mode: Decider is simulated. No prompts are sent to AWS.")
+else:
+    st.warning(
+        "Real Decider mode: requires a running Decider server. "
+        "No Bedrock calls are made by this app."
+    )
 
 text = st.text_area(
     "Enter text to scan",
@@ -24,14 +35,18 @@ if st.button("Scan and evaluate", type="primary"):
     else:
         sanitized, categories = redact_text(text)
 
-        # Simulated low-risk score for demonstrating the local policy.
-        # This is NOT a real Decider 2B prediction.
-        simulated_decider = {
-            "status": "SUCCESS",
-            "noul_score": 0.10,
-        }
+        if mode == "Demo Mode":
+            decider_result = {
+                "status": "SUCCESS",
+                "noul_score": 0.10,
+            }
+        else:
+            decider_result = DeciderClient().evaluate_noul(
+                processed_text=sanitized,
+                question_id="contains_secret",
+            )
 
-        result = evaluate_pipeline_policy(text, simulated_decider)
+        result = evaluate_pipeline_policy(text, decider_result)
 
         st.subheader("Security decision")
         st.write("**Action:**", result["action"])
@@ -46,7 +61,13 @@ if st.button("Scan and evaluate", type="primary"):
             st.subheader("Sanitized text")
             st.code(result["processed_text"])
 
-            st.success(
-                "Local policy approved this text. "
-                "No AI service was called in this demo."
-            )
+            if mode == "Demo Mode":
+                st.success(
+                    "Demo policy approved this text. "
+                    "No external AI service was called."
+                )
+            else:
+                st.success(
+                    "The real Decider endpoint returned a low-risk score. "
+                    "No Bedrock service was called."
+                )
